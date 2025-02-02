@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-import urllib.request
+from urllib.parse import urljoin
 import time
 
 def get_color_name(hsv):
@@ -40,18 +40,33 @@ def get_color_name(hsv):
     return "Unknown"
 
 def main():
-    # ESP32 camera URL - replace with your ESP32's IP address
-    url = 'http://your_esp32_ip_address/cam-stream'
+    # Get the ESP32's IP address from the serial monitor output
+    esp32_ip = "192.168.175.96"  # Replace with your ESP32's IP address
+    
+    # Try different possible endpoints
+    capture = cv2.VideoCapture(f'http://{esp32_ip}:81/stream')
+    
+    if not capture.isOpened():
+        print("Failed to open stream, trying alternative URL...")
+        capture = cv2.VideoCapture(f'http://{esp32_ip}/capture')
+    
+    if not capture.isOpened():
+        print("Failed to connect to camera. Please check the IP address and ensure the ESP32 is running.")
+        return
     
     # Size of the center rectangle for color detection
     rect_size = 50
     
+    print("Connected to camera stream. Press 'q' to quit.")
+    
     try:
         while True:
-            # Get image from ESP32
-            img_resp = urllib.request.urlopen(url)
-            imgnp = np.array(bytearray(img_resp.read()), dtype=np.uint8)
-            frame = cv2.imdecode(imgnp, -1)
+            ret, frame = capture.read()
+            
+            if not ret:
+                print("Failed to get frame, retrying...")
+                time.sleep(1)
+                continue
             
             # Get frame dimensions
             height, width = frame.shape[:2]
@@ -66,18 +81,21 @@ def main():
             # Get center region
             center_region = frame[y:y+rect_size, x:x+rect_size]
             
-            # Convert to HSV
-            hsv = cv2.cvtColor(center_region, cv2.COLOR_BGR2HSV)
-            
-            # Get average HSV values in the region
-            avg_hsv = np.mean(hsv, axis=(0,1)).astype(np.uint8)
-            
-            # Get color name
-            color_name = get_color_name(avg_hsv)
-            
-            # Display color name
-            cv2.putText(frame, f"Color: {color_name}", (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            try:
+                # Convert to HSV
+                hsv = cv2.cvtColor(center_region, cv2.COLOR_BGR2HSV)
+                
+                # Get average HSV values in the region
+                avg_hsv = np.mean(hsv, axis=(0,1)).astype(np.uint8)
+                
+                # Get color name
+                color_name = get_color_name(avg_hsv)
+                
+                # Display color name
+                cv2.putText(frame, f"Color: {color_name}", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            except Exception as e:
+                print(f"Color processing error: {e}")
             
             # Show frame
             cv2.imshow('Color Recognition', frame)
@@ -85,12 +103,13 @@ def main():
             # Exit if 'q' is pressed
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
-                
+            
             time.sleep(0.1)  # Small delay to prevent overwhelming the ESP32
             
     except Exception as e:
         print(f"Error: {e}")
     finally:
+        capture.release()
         cv2.destroyAllWindows()
 
 if __name__ == "__main__":
